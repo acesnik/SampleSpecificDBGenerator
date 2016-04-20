@@ -56,14 +56,14 @@ def generate_tryptic_peps(pep_seq):
 
 def update_tryp_index(trypIndex, exon1Right, exon2Left, peptide):
     trypIndex += len(peptide) * 3
-    if trypIndex > exon1Right and trypIndex < exon2Left: #excedes the first exon 
+    if trypIndex > exon1Right and trypIndex < exon2Left: #excedes the first exon
         trypIndex = trypIndex - exon1Right + exon2Left - 1 #set to position in exon2
     return trypIndex
 
 def translate_bed_line(root, geneModel, line, nsjDepthCut, minLength, refName, scoreName):
         entry = BedEntry(line)
         if entry.score <= nsjDepthCut: return # evaluate for depth cutoff
-        translations = entry.get_filtered_translations()
+        translations = entry.get_filtered_translations(entry.name)
         for i, tx in enumerate(translations):
             if tx:
                 (chromStart, chromEnd, translation) = tx
@@ -73,16 +73,16 @@ def translate_bed_line(root, geneModel, line, nsjDepthCut, minLength, refName, s
                 exon2Left = entry.chromStart + entry.blockStarts[1]
                 exon1Right = exon1Left + entry.blockSizes[0] - 1
                 exon2Right = exon2Left + entry.blockSizes[1] - 1
-                
+
                 #Iterate through tryptic fragments and enter the one containing the junction into the database
                 trypFragLeft, trypFragRight = chromStart, chromStart - 1
                 trypticPeptides = generate_tryptic_peps(translation)
                 for j, peptide in enumerate(trypticPeptides):
                     trypFragRight = update_tryp_index(trypFragRight, exon1Right, exon2Left, peptide)
-                    
+
                     #Contains the junction, so look up type in gene model, e.g. exon1::novel;exon2:FOX1:protein_coding.
                     #Also, must not contain the arbitrary left end, which could be ragged and not tryptic. If it contains the right side, it must end with K or R.
-                    if trypFragLeft < exon1Right and trypFragRight > exon1Right and len(peptide) >= minLength: 
+                    if trypFragLeft < exon1Right and trypFragRight > exon1Right and len(peptide) >= minLength:
                         exon1Type = geneModel.identify_range(entry.chrom, entry.strand, trypFragLeft, exon1Right)
                         exon2Type = geneModel.identify_range(entry.chrom, entry.strand, exon2Left, trypFragRight)
 
@@ -95,3 +95,4 @@ def translate_bed_line(root, geneModel, line, nsjDepthCut, minLength, refName, s
                         enter_seqvar(root, accession, refName, 'pep:splice', chromosome, exons, loci, score, '', '', peptide)
 
                     trypFragLeft = update_tryp_index(trypFragLeft, exon1Right, exon2Left, peptide)
+

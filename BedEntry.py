@@ -38,10 +38,7 @@ class BedEntry( object ):
 #        return splice_juncs
 
     def get_exon_seqs(self):
-        exons = []
-        for i in range(self.blockCount):
-            # splice_junc = "%s:%d_%d" % (self.chrom, self.chromStart + self.blockSizes[i], self.chromStart + self.blockStarts[i+1])
-            exons.append(self.seq[self.blockStarts[i] : self.blockStarts[i] + self.blockSizes[i]])
+        exons = [self.seq[self.blockStarts[i]:self.blockStarts[i]+self.blockSizes[i]] for i in range(self.blockCount)]
         if self.strand == '-':  #reverse complement
             exons.reverse()
             for i, s in enumerate(exons):
@@ -59,7 +56,7 @@ class BedEntry( object ):
 
     ## [[start,end,seq],[start,end,seq],[start,end,seq]]
     ## filter: ignore translation if stop codon in first exon after ignore_left_bp
-    def get_filtered_translations(self):
+    def get_filtered_translations(self, name):
         translations = [None, None, None]
         seq = self.get_spliced_seq()
         block_sum = sum(self.blockSizes)
@@ -70,11 +67,12 @@ class BedEntry( object ):
         if seq:
             for i in range(3):
                 stop_translation = len(seq) - ((len(seq) - i) % 3)
-                translation = self.get_translation(sequence = seq[i:stop_translation])
+                translation = self.get_translation(sequence=seq[i:stop_translation])
                 if translation:
                     hasEx1StopCodon = translation.rfind('*', 0, junc)
-                    if hasEx1StopCodon >= 0: continue
-                    tstart = 0
+                    if name.startswith('JUNC') and hasEx1StopCodon >= 0: continue
+                    elif name.startswith('JUNC'): tstart = 0
+                    elif name.startswith('STAR'): tstart = translation.rfind('*', 0, junc) + 1
                     stop = translation.find('*', junc)
                     tstop = stop if stop >= 0 else len(translation)
                     trimmed = translation[tstart:tstop]

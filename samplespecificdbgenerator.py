@@ -15,16 +15,18 @@ HTML_NS = "http://uniprot.org/uniprot"
 XSI_NS = "http://www.w3.org/2001/XMLSchema-instance"
 NAMESPACE_MAP = {None:HTML_NS, "xsi":XSI_NS}
 UP = '{'+HTML_NS+'}'
-    
+
 def __main__():
     #Parse Command Line
     parser = optparse.OptionParser()
       #I/O
     parser.add_option( '-x', '--reference_xml', dest='reference_xml', help='Reference protein UniProt-XML file. Sequence variant peptide entries are appended to this database to generate the ouptut UniProt-XML protein database.' )
     parser.add_option( '-p', '--protein_fasta', dest='protein_fasta', help='Reference protein FASTA file. Used to generate SAV peptide entries. If no UniProt-XML is specified, SAV and NSJ entries will be appended to this database to generate an output database. By default, this output will be a UniProt-XML protein database without PTM annotations. If --output-fasta is selected, the output will be a protein FASTA.')
+    parser.add_option( '-f', '--genome_fasta', dest='genome_fasta', help='Concatenated genome fasta file used to perform RNA-Seq analysis.')
     parser.add_option( '-g', '--gene_model', dest='gene_model', default=None, help='GTF gene model file. Used to annotate NSJ peptide entries.')
     parser.add_option( '-v', '--snpeff_vcf', dest='snpeff_vcf', help='SnpEff VCF file with HGVS annotations (else read from stdin).' )
     parser.add_option( '-b', '--splice_bed', dest='splice_bed', help='BED file (tophat junctions.bed) with sequence column added.' )
+    parser.add_option( '-s', '--star_splices', dest='star_splices', help='STAR SJ.out.tab file.')
     parser.add_option( '-o', '--output', dest='output', help='Output file path. Outputs UniProt-XML format unless --output-fasta is selected.' )
     parser.add_option( '-z', '--output_fasta', dest='output_fasta', action='store_true', default=False, help='Output a FASTA-format database. Place path for output file after the --output flag.')
       #Peptide sequence construction
@@ -38,7 +40,7 @@ def __main__():
     parser.add_option( '-Q', '--bed_score_name', dest='bed_score_name', default="depth", help='Include in the NSJ ID line score_name:score. Default: "depth."'  )
     parser.add_option( '-R', '--reference', dest='reference', default="None", help='Genome Reference Name for NSJ ID location. Automatically pulled from genome_build header in GTF if present.'  )
     (options, args) = parser.parse_args()
-    
+
     ##INPUTS##
     #Protein FASTA
     try:
@@ -48,7 +50,7 @@ def __main__():
     except Exception, e:
         print >> sys.stderr, "failed: %s" % e
         exit(2)
-    
+
     #Reference XML/FASTA
     if options.reference_xml != None:
         try:
@@ -85,7 +87,7 @@ def __main__():
         except Exception, e:
             print >> sys.stderr, "Opening outfile failed: %s" % e
             exit(3)
-            
+
     #Process gene model
     try:
         geneModelFile = os.path.abspath(options.gene_model)
@@ -100,34 +102,68 @@ def __main__():
     except Exception, e:
         print >> sys.stderr, "Parsing gene model failed: %s" % e
         exit(2)
-    
-    #Process VCF
+
+    # Process VCF
     try:
         snpeff_vcf = os.path.abspath(options.snpeff_vcf)
         linect = sum(1 for line in open(snpeff_vcf))
         snpeff_vcf = open(snpeff_vcf, 'r')
         for i, vcf_line in enumerate(snpeff_vcf):
             if i % 1000 == 0: print "snpeff_vcf line " + str(i) + " of " + str(linect)
-            variantcalls.parse_vcf_line(root, vcf_line, protein_fasta, options.snv_depth_cutoff, options.minimum_length, options.leading_aa_num, options.trailing_aa_num)
+            variantcalls.parse_vcf_line(root, vcf_line, protein_fasta, options.snv_depth_cutoff,
+                                        options.minimum_length, options.leading_aa_num, options.trailing_aa_num)
         snpeff_vcf.close()
     except Exception, e:
         print >> sys.stderr, "VCF processing failed: %s" % e
         exit(1)
-    
-    #Process Splice BED
+
+    #Process Splices
     try:
-        splice_bed = os.path.abspath(options.splice_bed)
-        linect = sum(1 for line in open(splice_bed))
-        splice_bed = open(splice_bed, 'r')
-        for i, bed_line in enumerate(splice_bed):
-            if i % 2000 == 0: print "splice_bed line " + str(i) + " of " + str(linect)
-            if bed_line.startswith('track'): continue
-            novelsplices.translate_bed_line(root, geneModel, bed_line, options.nsj_depth_cutoff, options.minimum_length, options.reference, options.bed_score_name)
-        splice_bed.close()
+        splice_model = refparse.GeneModel()
+        if options.splice_bed != None:
+            splice_bed = os.path.abspath(options.splice_bed)
+            linect = sum(1 for line in open(splice_bed))
+            splice_bed = open(splice_bed, 'r')
+            for i, bed_line in enumerate(splice_bed):
+                if i % 2000 == 0: print "splice_bed line " + str(i) + " of " + str(linect)
+                if bed_line.startswith('track'): continue
+                novelsplices.translate_bed_line(root, geneModel, bed_line, options.nsj_depth_cutoff, options.minimum_length, options.reference, options.bed_score_name)
+            splice_bed.close()
+        if options.star_splices != None:
+            EXON_LENGTH = 999 #Assumed for the purpose of appending tryptic peptides containing the junction
+            genome_fasta = refparse.read_protein_fasta(open(options.genome_fasta))
+            genome_fasta = ([x.split()[0][1:] for x in genome_fasta[0]], genome_fasta[1])
+            star_splices = os.path.abspath(options.star_splices)
+            linect = sum(1 for line in open(star_splices))
+            star_splices = open(star_splices, 'r')
+            for i, splice_line in enumerate(star_splices): #Ensembl is 1-indexed for chromosome coordinates
+                if i % 2000 == 0: print "star_splices line " + str(i) + " of " + str(linect)
+                if splice_line.startswith('track'): continue
+                splice_line = splice_line.split('\t')
+                annotated = int(splice_line[5])
+                if annotated: continue
+                chrom_name, intron_start, intron_end, strand = splice_line[0], int(splice_line[1]), int(splice_line[2]), int(splice_line[3])
+                if not strand: continue
+                exon1len, exon2len = EXON_LENGTH, EXON_LENGTH
+                fragment_start, fragment_end = intron_start - EXON_LENGTH, intron_end + EXON_LENGTH
+                junc_name = 'STAR' + str(i)
+                strand = '+' if strand == '1' else '-'
+                uniquely_mapping_ct = int(splice_line[6])
+                multi_mapping_ct = int(splice_line[7])
+                score = uniquely_mapping_ct + multi_mapping_ct
+                if fragment_start < 1:
+                    exon1len = exon1len + fragment_start - 1
+                    fragment_start = 1
+                if fragment_end > len(genome_fasta[1][genome_fasta[0].index(chrom_name)]):
+                    exon2len = exon2len - fragment_end + len(genome_fasta[1][genome_fasta[0].index(chrom_name)])
+                    fragment_end = len(genome_fasta[1][genome_fasta[0].index(chrom_name)])
+                bed_line = '\t'.join(str(x) for x in [chrom_name, fragment_start, fragment_end, junc_name, score, strand, fragment_start, fragment_end, '255,0,0', 2, str(exon1len) + ',' + str(exon2len), '0,' + str(intron_end - intron_start + 1), genome_fasta[1][genome_fasta[0].index(chrom_name)][fragment_start - 1:fragment_end]])
+                novelsplices.translate_bed_line(root, geneModel, bed_line, options.nsj_depth_cutoff, options.minimum_length, options.reference, options.bed_score_name)
+            star_splices.close()
     except Exception, e:
         print >> sys.stderr, "Splice BED processing failed: %s" % e
         exit(2)
-    
+
     #Write the sample specific database to outfile
     if not options.output_fasta: db.write(outFile, pretty_print=True)
     else:
