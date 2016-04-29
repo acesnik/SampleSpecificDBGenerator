@@ -140,8 +140,8 @@ def __main__():
                 if i % 2000 == 0: print "star_splices line " + str(i) + " of " + str(linect)
                 if splice_line.startswith('track'): continue
                 splice_line = splice_line.split('\t')
-                annotated = int(splice_line[5])
-                if annotated: continue
+                intron_motif, annotated = int(splice_line[4]), int(splice_line[5])
+                if annotated or intron_motif == 0: continue
                 chrom_name, intron_start, intron_end, strand = splice_line[0], int(splice_line[1]), int(splice_line[2]), int(splice_line[3])
                 if not strand: continue
                 exon1len, exon2len = EXON_LENGTH, EXON_LENGTH
